@@ -36,7 +36,7 @@ public:
 };
 
 // 误差模型 模板参数：观测值维度，类型，连接顶点类型
-class CurveFittingEdge : public g2o::BaseUnaryEdge<1, double, CurveFittingVertex> {
+class CurveFittingEdge : public g2o::BaseUnaryEdge<1, double, CurveFittingVertex> { //  用一个顶点建立单顶点边
 public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
@@ -51,12 +51,12 @@ public:
 
   // 计算雅可比矩阵
   virtual void linearizeOplus() override {
-    const CurveFittingVertex *v = static_cast<const CurveFittingVertex *> (_vertices[0]);
-    const Eigen::Vector3d abc = v->estimate();
-    double y = exp(abc[0] * _x * _x + abc[1] * _x + abc[2]);
-    _jacobianOplusXi[0] = -_x * _x * y;
-    _jacobianOplusXi[1] = -_x * y;
-    _jacobianOplusXi[2] = -y;
+    const CurveFittingVertex *v = static_cast<const CurveFittingVertex *> (_vertices[0]); // 取出顶点
+    const Eigen::Vector3d abc = v->estimate(); // 顶点中存放了待估计值
+    double y = exp(abc[0] * _x * _x + abc[1] * _x + abc[2]); // 根据估计值计算观测
+    _jacobianOplusXi[0] = -_x * _x * y; // (误差项 = y_由待优化参数估计出来的观测 - y_实际观测) 对于a的导偏导数
+    _jacobianOplusXi[1] = -_x * y; // (误差项 = y_由待优化参数估计出来的观测 - y_实际观测) 对于b的导偏导数
+    _jacobianOplusXi[2] = -y; // (误差项 = y_由待优化参数估计出来的观测 - y_实际观测) 对于c的导偏导数
   }
 
   virtual bool read(istream &in) {}
@@ -64,7 +64,7 @@ public:
   virtual bool write(ostream &out) const {}
 
 public:
-  double _x;  // x 值， y 值为 _measurement
+  double _x;  // x 值， y 值为 _measurement   x就是已知的路标点  在这条边中属于常数已知项 在建立边的时候就经过构造函数初始化存储起来
 };
 
 int main(int argc, char **argv) {
@@ -102,10 +102,11 @@ int main(int argc, char **argv) {
   // 往图中增加边
   for (int i = 0; i < N; i++) {
     CurveFittingEdge *edge = new CurveFittingEdge(x_data[i]);
-    edge->setId(i);
-    edge->setVertex(0, v);                // 设置连接的顶点
-    edge->setMeasurement(y_data[i]);      // 观测数值
-    edge->setInformation(Eigen::Matrix<double, 1, 1>::Identity() * 1 / (w_sigma * w_sigma)); // 信息矩阵：协方差矩阵之逆
+    edge->setId(i); 
+    edge->setVertex(v->id() , v);                // 设置连接的顶点 顶点ID可以直接通过接口获得
+    edge->setMeasurement(y_data[i]);      // 设置实际观测数值
+    edge->setInformation(Eigen::Matrix<double, 1, 1>::Identity() * 1 / (w_sigma * w_sigma)); // 信息矩阵：协方差矩阵之逆 
+    // w_sigma越小,表示该次观测越精确, 其误差越重要
     optimizer.addEdge(edge);
   }
 
