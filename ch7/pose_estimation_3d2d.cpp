@@ -62,17 +62,17 @@ int main(int argc, char **argv) {
 
   // 建立3D点
   Mat d1 = imread(argv[3], CV_LOAD_IMAGE_UNCHANGED);       // 深度图为16位无符号数，单通道图像
-  Mat K = (Mat_<double>(3, 3) << 520.9, 0, 325.1, 0, 521.0, 249.7, 0, 0, 1);
+  Mat K = (Mat_<double>(3, 3) << 520.9, 0, 325.1, 0, 521.0, 249.7, 0, 0, 1); // 内参
   vector<Point3f> pts_3d;
   vector<Point2f> pts_2d;
   for (DMatch m:matches) {
-    ushort d = d1.ptr<unsigned short>(int(keypoints_1[m.queryIdx].pt.y))[int(keypoints_1[m.queryIdx].pt.x)];
+    ushort d = d1.ptr<unsigned short>(int(keypoints_1[m.queryIdx].pt.y))[int(keypoints_1[m.queryIdx].pt.x)]; // 某个匹配对的特征点在相机1上的深度  y行x列
     if (d == 0)   // bad depth
       continue;
-    float dd = d / 5000.0;
-    Point2d p1 = pixel2cam(keypoints_1[m.queryIdx].pt, K);
-    pts_3d.push_back(Point3f(p1.x * dd, p1.y * dd, dd));
-    pts_2d.push_back(keypoints_2[m.trainIdx].pt);
+    float dd = d / 5000.0; // TODO 为什么这里要缩小深度? 
+    Point2d p1 = pixel2cam(keypoints_1[m.queryIdx].pt, K); // 计算像素点的对应的空间点的归一化平面坐标
+    pts_3d.push_back(Point3f(p1.x * dd, p1.y * dd, dd)); // 归一化平面坐标点 乘以深度 然后得到3D空间点
+    pts_2d.push_back(keypoints_2[m.trainIdx].pt);  // 对应的另一个相机上的2D像素点
   }
 
   cout << "3d-2d pairs: " << pts_3d.size() << endl;
@@ -96,15 +96,17 @@ int main(int argc, char **argv) {
     pts_2d_eigen.push_back(Eigen::Vector2d(pts_2d[i].x, pts_2d[i].y));
   }
 
-  cout << "calling bundle adjustment by gauss newton" << endl;
-  Sophus::SE3d pose_gn;
+  // 手写Gaussian Newton Method to Get Result
+  cout << "手写Gaussian Newton Method  calling bundle adjustment by gauss newton" << endl;
+  Sophus::SE3d pose_gn; // Sophus库
   t1 = chrono::steady_clock::now();
   bundleAdjustmentGaussNewton(pts_3d_eigen, pts_2d_eigen, K, pose_gn);
   t2 = chrono::steady_clock::now();
   time_used = chrono::duration_cast<chrono::duration<double>>(t2 - t1);
   cout << "solve pnp by gauss newton cost time: " << time_used.count() << " seconds." << endl;
 
-  cout << "calling bundle adjustment by g2o" << endl;
+  // 用G2o建模求解BA问题
+  cout << "用G2o建模求解BA问题 calling bundle adjustment by g2o" << endl;
   Sophus::SE3d pose_g2o;
   t1 = chrono::steady_clock::now();
   bundleAdjustmentG2O(pts_3d_eigen, pts_2d_eigen, K, pose_g2o);
@@ -173,30 +175,30 @@ void bundleAdjustmentGaussNewton(
   const VecVector3d &points_3d,
   const VecVector2d &points_2d,
   const Mat &K,
-  Sophus::SE3d &pose) {
+  Sophus::SE3d &pose) { // pose是被优化的变量  结果由它传递出去
   typedef Eigen::Matrix<double, 6, 1> Vector6d;
   const int iterations = 10;
   double cost = 0, lastCost = 0;
   double fx = K.at<double>(0, 0);
   double fy = K.at<double>(1, 1);
   double cx = K.at<double>(0, 2);
-  double cy = K.at<double>(1, 2);
+  double cy = K.at<double>(1, 2); // 内参
 
   for (int iter = 0; iter < iterations; iter++) {
-    Eigen::Matrix<double, 6, 6> H = Eigen::Matrix<double, 6, 6>::Zero();
+    Eigen::Matrix<double, 6, 6> H = Eigen::Matrix<double, 6, 6>::Zero(); // Hessian矩阵
     Vector6d b = Vector6d::Zero();
 
     cost = 0;
     // compute cost
-    for (int i = 0; i < points_3d.size(); i++) {
-      Eigen::Vector3d pc = pose * points_3d[i];
-      double inv_z = 1.0 / pc[2];
+    for (int i = 0; i < points_3d.size(); i++) { // 遍历每个3d点
+      Eigen::Vector3d pc = pose * points_3d[i]; // 根据现在的pose,估计得到第二个相机的坐标系下的3D点坐标
+      double inv_z = 1.0 / pc[2]; 
       double inv_z2 = inv_z * inv_z;
-      Eigen::Vector2d proj(fx * pc[0] / pc[2] + cx, fy * pc[1] / pc[2] + cy);
+      Eigen::Vector2d proj(fx * pc[0] / pc[2] + cx, fy * pc[1] / pc[2] + cy); // 得到第二个相机下的归一化平面坐标
 
-      Eigen::Vector2d e = points_2d[i] - proj;
+      Eigen::Vector2d e = points_2d[i] - proj; // 计算重投影误差
 
-      cost += e.squaredNorm();
+      cost += e.squaredNorm(); // 二范数 没有信息矩阵
       Eigen::Matrix<double, 2, 6> J;
       J << -fx * inv_z,
         0,
@@ -209,7 +211,7 @@ void bundleAdjustmentGaussNewton(
         fy * pc[1] * inv_z2,
         fy + fy * pc[1] * pc[1] * inv_z2,
         -fy * pc[0] * pc[1] * inv_z2,
-        -fy * pc[0] * inv_z;
+        -fy * pc[0] * inv_z; //! 误差的Jacobian矩阵 参考2nd书的pg183
 
       H += J.transpose() * J;
       b += -J.transpose() * e;
@@ -230,7 +232,7 @@ void bundleAdjustmentGaussNewton(
     }
 
     // update your estimation
-    pose = Sophus::SE3d::exp(dx) * pose;
+    pose = Sophus::SE3d::exp(dx) * pose; //! 左扰动  因为求导数的时候是左扰动求的
     lastCost = cost;
 
     cout << "iteration " << iter << " cost=" << std::setprecision(12) << cost << endl;
@@ -313,12 +315,12 @@ void bundleAdjustmentG2O(
   // 构建图优化，先设定g2o
   typedef g2o::BlockSolver<g2o::BlockSolverTraits<6, 3>> BlockSolverType;  // pose is 6, landmark is 3
   typedef g2o::LinearSolverDense<BlockSolverType::PoseMatrixType> LinearSolverType; // 线性求解器类型
-  // 梯度下降方法，可以从GN, LM, DogLeg 中选
+  // 梯度下降方法，可以从GN, LM, DogLeg 中选 //! 配置G2O的求解器
   auto solver = new g2o::OptimizationAlgorithmGaussNewton(
     g2o::make_unique<BlockSolverType>(g2o::make_unique<LinearSolverType>()));
-  g2o::SparseOptimizer optimizer;     // 图模型
-  optimizer.setAlgorithm(solver);   // 设置求解器
-  optimizer.setVerbose(true);       // 打开调试输出
+  g2o::SparseOptimizer optimizer;     //! 图模型
+  optimizer.setAlgorithm(solver);   //! 设置求解器
+  optimizer.setVerbose(true);       //! 打开调试输出
 
   // vertex
   VertexPose *vertex_pose = new VertexPose(); // camera vertex_pose
@@ -338,14 +340,16 @@ void bundleAdjustmentG2O(
   for (size_t i = 0; i < points_2d.size(); ++i) {
     auto p2d = points_2d[i];
     auto p3d = points_3d[i];
-    EdgeProjection *edge = new EdgeProjection(p3d, K_eigen);
-    edge->setId(index);
-    edge->setVertex(0, vertex_pose);
-    edge->setMeasurement(p2d);
-    edge->setInformation(Eigen::Matrix2d::Identity());
-    optimizer.addEdge(edge);
+    EdgeProjection *edge = new EdgeProjection(p3d, K_eigen); //! 在边中计算误差
+    edge->setId(index); //! 设置边的ID
+    edge->setVertex(vertex_pose->id(), vertex_pose); //! 用顶点的接口函数获取ID 
+    edge->setMeasurement(p2d); //! 边中计算误差用到的measurement是3d点在第二个图片上的实际投影位置 作为观测
+    edge->setInformation(Eigen::Matrix2d::Identity()); //! 信息矩阵为单位矩阵
+    optimizer.addEdge(edge); //! 加入该边
     index++;
   }
+
+  std::cout << "图中顶点vertex的个数: " << optimizer.vertices().size() << std::endl;
 
   chrono::steady_clock::time_point t1 = chrono::steady_clock::now();
   optimizer.setVerbose(true);
