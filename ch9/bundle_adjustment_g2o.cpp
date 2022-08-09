@@ -109,6 +109,11 @@ public:
         _error = proj - _measurement;
     }
 
+    virtual void linearizeOplus() override{
+        g2o::BaseBinaryEdge<2, Vector2d, VertexPoseAndIntrinsics, VertexPoint>::linearizeOplus();
+        // std::cout<< "1"; //! 测试是否会调用这个函数
+    }
+
     // use numeric derivatives
     virtual bool read(istream &in) {}
 
@@ -187,7 +192,7 @@ void SolveBA(BALProblem &bal_problem) {
     }
 
     optimizer.initializeOptimization();
-    optimizer.optimize(40);
+    optimizer.optimize(1);
 
     // set to bal problem
     for (int i = 0; i < bal_problem.num_cameras(); ++i) {

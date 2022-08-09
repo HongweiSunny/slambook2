@@ -120,14 +120,16 @@ public:
         _error = (_measurement.inverse() * v1.inverse() * v2).log();
     }
 
-    // 雅可比计算
+    // 雅可比计算  //! 为什么在BA的时候不用计算Jacobian, 而在这里需要Jacobian? 
+    //! 因为之前BA的时候直接调用的是基类的实现, 是直接线性变化的, 而这里的误差是和李代数有关的
+    //! 误差的变化不能简单的线性变化 
     virtual void linearizeOplus() override {
         SE3d v1 = (static_cast<VertexSE3LieAlgebra *> (_vertices[0]))->estimate();
         SE3d v2 = (static_cast<VertexSE3LieAlgebra *> (_vertices[1]))->estimate();
         Matrix6d J = JRInv(SE3d::exp(_error));
         // 尝试把J近似为I？
-        _jacobianOplusXi = -J * v2.inverse().Adj();
-        _jacobianOplusXj = J * v2.inverse().Adj();
+        _jacobianOplusXi = -J * v2.inverse().Adj(); //! i表示e对于第一个节点的jacobian分量
+        _jacobianOplusXj = J * v2.inverse().Adj(); //! j表示对第2个节点的Jacobian分量
     }
 };
 
