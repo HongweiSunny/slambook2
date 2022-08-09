@@ -42,6 +42,8 @@ struct PoseAndIntrinsics {
     double k1 = 0, k2 = 0;
 };
 
+//! 书的pg249
+
 /// 位姿加相机内参的顶点，9维，前三维为so3，接下去为t, f, k1, k2
 class VertexPoseAndIntrinsics : public g2o::BaseVertex<9, PoseAndIntrinsics> {
 public:
@@ -167,7 +169,7 @@ void SolveBA(BALProblem &bal_problem) {
         double *point = points + point_block_size * i;
         v->setId(i + bal_problem.num_cameras());
         v->setEstimate(Vector3d(point[0], point[1], point[2]));
-        // g2o在BA中需要手动设置待Marg的顶点
+        //! g2o在BA中需要手动设置待Marg的顶点   //! 所有的相机3D点都被边缘化
         v->setMarginalized(true);
         optimizer.addVertex(v);
         vertex_points.push_back(v);

@@ -41,15 +41,16 @@ void SolveBA(BALProblem &bal_problem) {
         // Each Residual block takes a point and a camera as input
         // and outputs a 2 dimensional Residual
         cost_function = SnavelyReprojectionError::Create(observations[2 * i + 0], observations[2 * i + 1]);
+        //! 在创建cost的时候  用观测进行初始化  之后用待优化参数和对象中的观测值进行误差计算 并自动求导
 
         // If enabled use Huber's loss function.
-        ceres::LossFunction *loss_function = new ceres::HuberLoss(1.0);
+        ceres::LossFunction *loss_function = new ceres::HuberLoss(1.0); //! 鲁棒核函数
 
         // Each observation corresponds to a pair of a camera and a point
         // which are identified by camera_index()[i] and point_index()[i]
         // respectively.
         double *camera = cameras + camera_block_size * bal_problem.camera_index()[i];
-        double *point = points + point_block_size * bal_problem.point_index()[i];
+        double *point = points + point_block_size * bal_problem.point_index()[i];  //! camera和point都是待优化的参数
 
         problem.AddResidualBlock(cost_function, loss_function, camera, point);
     }

@@ -43,7 +43,7 @@ BALProblem::BALProblem(const std::string &filename, bool use_quaternions) {
     // This wil die horribly on invalid files. Them's the breaks.
     FscanfOrDie(fptr, "%d", &num_cameras_);
     FscanfOrDie(fptr, "%d", &num_points_);
-    FscanfOrDie(fptr, "%d", &num_observations_);
+    FscanfOrDie(fptr, "%d", &num_observations_); //! 读取文件的第一行中的数字  得到点的数目  相机机位的数量  观测的数量
 
     std::cout << "Header: " << num_cameras_
               << " " << num_points_
@@ -51,21 +51,21 @@ BALProblem::BALProblem(const std::string &filename, bool use_quaternions) {
 
     point_index_ = new int[num_observations_];
     camera_index_ = new int[num_observations_];
-    observations_ = new double[2 * num_observations_];
-
-    num_parameters_ = 9 * num_cameras_ + 3 * num_points_;
+    observations_ = new double[2 * num_observations_];  //! 为什么用观测的数量来开辟
+ 
+    num_parameters_ = 9 * num_cameras_ + 3 * num_points_; //! 总的待优化的参数的维度 
     parameters_ = new double[num_parameters_];
 
     for (int i = 0; i < num_observations_; ++i) {
-        FscanfOrDie(fptr, "%d", camera_index_ + i);
-        FscanfOrDie(fptr, "%d", point_index_ + i);
+        FscanfOrDie(fptr, "%d", camera_index_ + i); //! 得到相机的索引
+        FscanfOrDie(fptr, "%d", point_index_ + i); //! 点的索引
         for (int j = 0; j < 2; ++j) {
-            FscanfOrDie(fptr, "%lf", observations_ + 2 * i + j);
+            FscanfOrDie(fptr, "%lf", observations_ + 2 * i + j); //! 观测
         }
     }
 
     for (int i = 0; i < num_parameters_; ++i) {
-        FscanfOrDie(fptr, "%lf", parameters_ + i);
+        FscanfOrDie(fptr, "%lf", parameters_ + i); //! 获得待优化参数的初始值 每9个是矩阵 后面每3个是点的xyz
     }
 
     fclose(fptr);

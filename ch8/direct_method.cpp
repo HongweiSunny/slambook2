@@ -164,18 +164,19 @@ void DirectPoseEstimationSingleLayer(
     const int iterations = 10;
     double cost = 0, lastCost = 0;
     auto t1 = chrono::steady_clock::now();
-    JacobianAccumulator jaco_accu(img1, img2, px_ref, depth_ref, T21);
+    JacobianAccumulator jaco_accu(img1, img2, px_ref, depth_ref, T21); //! img_1 是left.image, img_2 是编号1-6的img, T21是目标
 
     for (int iter = 0; iter < iterations; iter++) {
         jaco_accu.reset();
         cv::parallel_for_(cv::Range(0, px_ref.size()),
                           std::bind(&JacobianAccumulator::accumulate_jacobian, &jaco_accu, std::placeholders::_1));
+                          //! std::bind生成了一个可调用对象, 其占位符_1, 最后实际上就是cv::Range
         Matrix6d H = jaco_accu.hessian();
         Vector6d b = jaco_accu.bias();
 
         // solve update and put it into estimation
-        Vector6d update = H.ldlt().solve(b);;
-        T21 = Sophus::SE3d::exp(update) * T21;
+        Vector6d update = H.ldlt().solve(b);; //! 更新的李代数量
+        T21 = Sophus::SE3d::exp(update) * T21; //! 更新的到新的T21
         cost = jaco_accu.cost_func();
 
         if (std::isnan(update[0])) {
@@ -219,7 +220,7 @@ void DirectPoseEstimationSingleLayer(
 }
 
 void JacobianAccumulator::accumulate_jacobian(const cv::Range &range) {
-
+    //! 累加得到最小二乘法的Hessian矩阵和b矩阵 , H * delta_x = b
     // parameters
     const int half_patch_size = 1;
     int cnt_good = 0;
@@ -231,27 +232,28 @@ void JacobianAccumulator::accumulate_jacobian(const cv::Range &range) {
 
         // compute the projection in the second image
         Eigen::Vector3d point_ref =
-            depth_ref[i] * Eigen::Vector3d((px_ref[i][0] - cx) / fx, (px_ref[i][1] - cy) / fy, 1);
-        Eigen::Vector3d point_cur = T21 * point_ref;
+            depth_ref[i] * Eigen::Vector3d((px_ref[i][0] - cx) / fx, (px_ref[i][1] - cy) / fy, 1); //! 归一化平面上的点乘以像素对应的深度
+        Eigen::Vector3d point_cur = T21 * point_ref; //! T21是坐标系2到坐标系1的坐标转换  point_ref是坐标系1中表示的点
         if (point_cur[2] < 0)   // depth invalid
             continue;
 
-        float u = fx * point_cur[0] / point_cur[2] + cx, v = fy * point_cur[1] / point_cur[2] + cy;
+        float u = fx * point_cur[0] / point_cur[2] + cx, v = fy * point_cur[1] / point_cur[2] + cy; //! 得到坐标系2下面的点的像素
         if (u < half_patch_size || u > img2.cols - half_patch_size || v < half_patch_size ||
             v > img2.rows - half_patch_size)
-            continue;
+            continue; //! 超出范围则continue
 
-        projection[i] = Eigen::Vector2d(u, v);
+        projection[i] = Eigen::Vector2d(u, v); //! 投影点
         double X = point_cur[0], Y = point_cur[1], Z = point_cur[2],
             Z2 = Z * Z, Z_inv = 1.0 / Z, Z2_inv = Z_inv * Z_inv;
         cnt_good++;
-
+        
+        //! 下面计算光度误差, 基于灰度不变假设
         // and compute error and jacobian
-        for (int x = -half_patch_size; x <= half_patch_size; x++)
+        for (int x = -half_patch_size; x <= half_patch_size; x++){ //! x = -1 0 1 
             for (int y = -half_patch_size; y <= half_patch_size; y++) {
 
                 double error = GetPixelValue(img1, px_ref[i][0] + x, px_ref[i][1] + y) -
-                               GetPixelValue(img2, u + x, v + y);
+                               GetPixelValue(img2, u + x, v + y);  // left image 上的像素点的灰度值 - 另外一张图上的对应像素点的灰度值
                 Matrix26d J_pixel_xi;
                 Eigen::Vector2d J_img_pixel;
 
@@ -267,26 +269,27 @@ void JacobianAccumulator::accumulate_jacobian(const cv::Range &range) {
                 J_pixel_xi(1, 2) = -fy * Y * Z2_inv;
                 J_pixel_xi(1, 3) = -fy - fy * Y * Y * Z2_inv;
                 J_pixel_xi(1, 4) = fy * X * Y * Z2_inv;
-                J_pixel_xi(1, 5) = fy * X * Z_inv;
+                J_pixel_xi(1, 5) = fy * X * Z_inv; //! 单个灰度误差的Jacobian矩阵的后半部分
 
                 J_img_pixel = Eigen::Vector2d(
                     0.5 * (GetPixelValue(img2, u + 1 + x, v + y) - GetPixelValue(img2, u - 1 + x, v + y)),
                     0.5 * (GetPixelValue(img2, u + x, v + 1 + y) - GetPixelValue(img2, u + x, v - 1 + y))
-                );
+                ); //! 单个灰度误差的Jacobian矩阵的前半部分: 灰度对于像素的梯度, 两个方向上的梯度是以 当前像素前后的两个灰度值的差值的一半
 
                 // total jacobian
-                Vector6d J = -1.0 * (J_img_pixel.transpose() * J_pixel_xi).transpose();
+                Vector6d J = -1.0 * (J_img_pixel.transpose() * J_pixel_xi).transpose(); //! 完整的jacobian矩阵
 
-                hessian += J * J.transpose();
-                bias += -error * J;
-                cost_tmp += error * error;
+                hessian += J * J.transpose(); //! 累加Jacobian
+                bias += -error * J; //! b = -J * f(x)
+                cost_tmp += error * error; //! sum of costs
             }
+        }
     }
 
     if (cnt_good) {
         // set hessian, bias and cost
         unique_lock<mutex> lck(hessian_mutex);
-        H += hessian;
+        H += hessian; //! 因为在这个range里, 是并行计算的, 所以给成员函数加上去的时候要加上线程锁
         b += bias;
         cost += cost_tmp / cnt_good;
     }
@@ -302,7 +305,7 @@ void DirectPoseEstimationMultiLayer(
     // parameters
     int pyramids = 4;
     double pyramid_scale = 0.5;
-    double scales[] = {1.0, 0.5, 0.25, 0.125};
+    double scales[] = {1.0, 0.5, 0.25, 0.125}; //! 0.5^(n-1)
 
     // create pyramids
     vector<cv::Mat> pyr1, pyr2; // image pyramids
@@ -319,21 +322,23 @@ void DirectPoseEstimationMultiLayer(
             pyr1.push_back(img1_pyr);
             pyr2.push_back(img2_pyr);
         }
-    }
+    } //! 得到四层的金字塔
 
     double fxG = fx, fyG = fy, cxG = cx, cyG = cy;  // backup the old values
     for (int level = pyramids - 1; level >= 0; level--) {
         VecVector2d px_ref_pyr; // set the keypoints in this pyramid level
-        for (auto &px: px_ref) {
-            px_ref_pyr.push_back(scales[level] * px);
+        for (auto &px: px_ref) { //! 随机选取的像素点位置
+            px_ref_pyr.push_back(scales[level] * px); //! 像素点坐标要随着每一层的scale的变化而变化
         }
 
         // scale fx, fy, cx, cy in different pyramid levels
-        fx = fxG * scales[level];
+        fx = fxG * scales[level]; //! 每一层的内参参数也都要相应的变化 因为内参的参数是包含了由meter的单位到像素单位的转换系数的
         fy = fyG * scales[level];
         cx = cxG * scales[level];
         cy = cyG * scales[level];
-        DirectPoseEstimationSingleLayer(pyr1[level], pyr2[level], px_ref_pyr, depth_ref, T21);
+        DirectPoseEstimationSingleLayer(pyr1[level], pyr2[level], px_ref_pyr, depth_ref, T21); //! 调用单层的函数做直接法估计
+        //! pyr1是left_image对应的 金字塔  
+        //! pyr2是编号1-5的图片对应的金字塔
     }
 
 }
